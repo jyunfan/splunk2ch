@@ -4,7 +4,7 @@ Created on 2011/9/25
 @author: fakecolor
 '''
 
-#from datetime import datetime
+import datetime
 import os
 import sys
 
@@ -16,5 +16,5 @@ def AddLog(msg):
     if not LogFile:
         sys.stderr.write("Failed to open" + os.path.join(ProgramRoot, 'data', 'log.txt'))
         return
-    LogFile.write((msg + u"\n").encode('utf-8'))
+    LogFile.write((str(datetime.datetime.now()) + u' ' + msg + u"\n").encode('utf-8'))
     LogFile.close()

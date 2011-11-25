@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 '''
-Created on 2011/11/18
+Created on 2011/11/25
 
 @author: jyunfan@gmail.com
 @version: 0.1
@@ -11,19 +11,18 @@ Python 2.6
 import ConfigParser
 import urllib2
 import os
+import datetime
 import time
 import re
-import glob
 import Log
 import sys
-#import codecs
 
 DebugMode = True
 
-MaxThreadPoolSize = 10000
+MaxThreadPoolSize = 100000
 
 # How many seconds should we wait to get board data
-BoardQueryInterval  = 300
+BoardQueryInterval  = 60
 
 # How many seconds should we wait to get thread data
 ThreadQueryInterval = 10
@@ -33,6 +32,8 @@ DefaultEncode = 'Shift_JIS'
 
 # Regular expression for extracting threads from output of subback
 ThreadFormat = re.compile("<a href=\"(\d+)\S*\s+(.*?)\s+\((\d+)\)</a>$")
+
+UrlCleanRe = re.compile("")
 
 ProgramRoot = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
 
@@ -47,7 +48,7 @@ def get_boardlist():
     config = ConfigParser.ConfigParser()
     config.read(os.path.join(ProgramRoot, 'local/2ch.conf'))
     if config.has_option('settings', 'boardlist'):
-        return config.get('settings', 'boardlist', '').split(';')
+        return [re.sub("(http://)|(/$)", '', board) for board in config.get('settings', 'boardlist', '').split(';')]
     return
 
 # Input:  board name
@@ -106,8 +107,7 @@ def update_threadpool_status(board, cachedthreads, updatedthreads):
         #Log.AddLog("Update thread:" + board + ":" + key)
         if DebugMode:
             save_thread_metadata(board, key, cachedthreads[key])
-
-            
+    
 def save_thread_metadata(board, key, metadata):
     config = ConfigParser.ConfigParser()
     # Be aware of encode
@@ -121,13 +121,15 @@ def save_thread_metadata(board, key, metadata):
 
 def splunk_output(boardname, threadtitle, lines):
     [serverpart, boardpart] = boardname.split(u"/")
-    sys.stdout.write((u"***SPLUNK*** host=" + serverpart + u" sourcetype=" + boardpart + u" source=" + threadtitle + u"\n").encode('utf-8'))
+    sys.stdout.write((u"***SPLUNK*** host=" + serverpart + u" sourcetype=2ch:" + boardpart + u" source=\"" + threadtitle + u"\"\n").encode('utf-8'))
     for line in lines:
         #line = str(int(time.time())) + u' ' + line
         if len(line)==0:
             continue
+        # Add Tokyo time zone
+        line = re.sub('([\d/]+).*?([\d:\.]+)', '\g<1> \g<2> +09:00', line, 1)
         sys.stdout.write((line + u"\n").encode('utf-8'))
-        Log.AddLog(line)
+        #Log.AddLog(line)
     sys.stdout.flush()
 
 # Find id of a out-of-date_thread in threadpool
@@ -162,7 +164,13 @@ def update_thread(thread, boardname, thread_id):
     
     Log.AddLog("Fetch thread: Board=" + boardname + ", thread=" + thread_id + " response count:" + str(old_count) + "->" + str(thread['readcount']))
 
+def current_time_str():
+    return datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+
 def start(boardlist):
+    sys.stdout.write(u"***SPLUNK*** sourcetype=Config source=Config\n".encode('utf-8'))
+    sys.stdout.write((current_time_str() + u' Boardlist=' + u';'.join(boardlist) + u'\n').encode('utf-8'));
+    
     threadpools = {}
     
     # Load previous threads on file
@@ -181,10 +189,17 @@ def start(boardlist):
             if time.time() - last_query_board_time > BoardQueryInterval:
                 boardname = boardlist[last_query_board_idx]
                 Log.AddLog("Update board: "  + boardname)
-                updated_threads = get_thread_list(boardname)
-                update_threadpool_status(boardname, threadpools[boardname], updated_threads)
                 last_query_board_idx = (last_query_board_idx + 1) % len(boardlist)
                 last_query_board_time = time.time()
+                updated_threads = get_thread_list(boardname)
+                if updated_threads == None:
+                    Log.AddLog("Failed to get threads from " + boardname)
+                else:
+                    update_threadpool_status(boardname, threadpools[boardname], updated_threads)
+                    
+                    # Discard half threads if total number of threads exceeds the threshold
+                    if len(threadpools[boardname]) > MaxThreadPoolSize:
+                        threadpools[boardname].clear()
                 
             # Phase 2: Pick a thread and get its responses
             if time.time() - last_fetch_thread_time < ThreadQueryInterval:
@@ -198,6 +213,7 @@ def start(boardlist):
                     update_thread(threadpools[boardname][update_thread_id], boardname, update_thread_id)
                     last_fetch_thread_time = time.time()
                     last_board_idx = idx_board
+                    is_fetched = True
                     # Just process one thread in the loop
                     break
             
@@ -209,10 +225,11 @@ def start(boardlist):
             sys.stderr.write(str(sys.exc_info()[1][0])+"\n")
     
 if __name__ == "__main__":
-    print "hello 2ch"
-    print sys.getdefaultencoding()
+    #print "hello 2ch"
     boardlist = get_boardlist()
-    if len(boardlist) <= 0:
-        sys.exit(0)
     
+    if len(boardlist) <= 0:
+        sys.stderr.write("No valid board.")
+        sys.exit(0)
+        
     start(boardlist)
