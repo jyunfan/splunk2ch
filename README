@@ -1,0 +1,8 @@
+Brief description:
+Do you want to fetch threads in 2ch into Splunk database, so that you can search some interesting topics easily? Try this python script.
+If you have no idea about what Splunk is, that's fine. The script will print threads to standard output. You can change the code to print other format you want to use.
+
+Usage:
+1. Prepare a empty directory, $DIR, and download the source into it.
+2. Copy $DIR/default/2ch.conf.example to $DIR/local/2ch.conf. Add the boards you want to monitor.
+3. Run script bin/FetchThreads.py
